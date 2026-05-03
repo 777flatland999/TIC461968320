@@ -1,0 +1,162 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from astropy.timeseries import LombScargle
+import pandas as pd
+
+# ------------------------------------------------------------
+# 1. Load data (time [days], flux [W/m^2])
+# ------------------------------------------------------------
+# Replace this filename with the actual path to your data file.
+# This assumes two whitespace-separated columns: time flux
+dx = pd.read_csv('/Users/m.f.ob/Desktop/Transit_data_TIC461968320.csv')
+
+time = dx.iloc[:, 0].values
+flux = dx.iloc[:, 1].values
+
+
+# sort by time in case the file is not ordered
+order = np.argsort(time)
+time = time[order]
+flux = flux[order]
+
+# ------------------------------------------------------------
+# 2. Normalize flux and plot flux vs time
+# ------------------------------------------------------------
+# Normalize by median so the out-of-transit level is ~1
+median_flux = np.median(flux)
+norm_flux = flux / median_flux
+
+plt.figure(figsize=(8, 4))
+plt.scatter(time, norm_flux, s=5, color="black")
+plt.xlabel("Time [days]")
+plt.ylabel("Normalized flux")
+plt.title("TIC 461968320: Flux vs. Time")
+plt.tight_layout()
+plt.show()
+
+# ------------------------------------------------------------
+# 3. Lomb–Scargle periodogram to search for a period
+# ------------------------------------------------------------
+# Remove mean for period search
+y = norm_flux - np.mean(norm_flux)
+
+# Frequency range for observational period. 
+min_period = 1.0   # days
+max_period = 27.0  # days
+min_frequency = 1.0 / max_period
+max_frequency = 1.0 / min_period
+
+# Frequency grid
+frequency, power = LombScargle(time, y).autopower(
+    minimum_frequency=min_frequency,
+    maximum_frequency=max_frequency,
+    samples_per_peak=10
+)
+
+best_frequency = frequency[np.argmax(power)]
+best_period = 1.0 / best_frequency  # days
+
+print(f"Best period from Lomb–Scargle: {best_period:.4f} days")
+
+# Plot the periodogram
+plt.figure(figsize=(8, 4))
+plt.plot(1.0 / frequency, power, "k-")
+plt.axvline(best_period, color="red", linestyle="--",
+            label=f"Best period = {best_period:.3f} d")
+plt.xlabel("Period [days]")
+plt.ylabel("Lomb–Scargle Power")
+plt.title("Lomb–Scargle Periodogram")
+plt.legend()
+plt.gca().invert_xaxis()  # optional: shorter periods on the right
+plt.tight_layout()
+plt.show()
+
+# ------------------------------------------------------------
+# 4. Phase-fold light curve at best period
+# ------------------------------------------------------------
+phase = (time % best_period) / best_period
+
+plt.figure(figsize=(8, 4))
+plt.scatter(phase, norm_flux, s=5, color="black")
+plt.xlabel("Phase")
+plt.ylabel("Normalized flux")
+plt.title(f"Phase-folded light curve (P = {best_period:.3f} d)")
+plt.tight_layout()
+plt.show()
+
+# ------------------------------------------------------------
+# 5. Estimate transit depth from phase-folded light curve
+# ------------------------------------------------------------
+# Simple approach:
+#   1. Find the phase where the average flux is minimum
+#   2. Define a small phase window around that minimum as "in transit"
+#   3. Everything else is "out of transit"
+# Adjust 'nbins' and 'window_half_width' as needed.
+
+nbins = 100
+bins = np.linspace(0, 1, nbins + 1)
+bin_centers = 0.5 * (bins[:-1] + bins[1:])
+
+# Compute binned flux to find the approximate transit location
+binned_flux = np.zeros(nbins)
+for i in range(nbins):
+    in_bin = (phase >= bins[i]) & (phase < bins[i + 1])
+    if np.any(in_bin):
+        binned_flux[i] = np.median(norm_flux[in_bin])
+    else:
+        binned_flux[i] = np.nan
+
+# Find phase of minimum binned flux (candidate transit center)
+valid = ~np.isnan(binned_flux)
+min_bin_index = np.argmin(binned_flux[valid])
+transit_phase_center = bin_centers[valid][min_bin_index]
+
+print(f"Estimated transit phase center: {transit_phase_center:.3f}")
+
+# Define in-transit region
+window_half_width = 0.02  # 2% of phase on each side
+in_transit = np.abs((phase - transit_phase_center + 0.5) % 1.0 - 0.5) < window_half_width
+out_of_transit = ~in_transit
+
+# Median fluxes in and out of transit
+F_out = np.median(norm_flux[out_of_transit])
+F_in = np.median(norm_flux[in_transit])
+
+# Transit depth delta = (F_out - F_in) / F_out
+delta = (F_out - F_in) / F_out
+print(f"Estimated transit depth: {delta:.6e}")
+
+# ------------------------------------------------------------
+# 6. Convert transit depth to planet radius
+# ------------------------------------------------------------
+# Transit-depth relation:
+#   delta = (R_p / R_star)^2  -> R_p / R_star = sqrt(delta)
+# Use R_star = 1.13 R_sun as given in the assignment.
+
+R_sun = 6.957e8      # meters
+R_jup = 6.9911e7     # meters (approximate)
+R_star_Rsun = 1.13   # from assignment
+R_star = R_star_Rsun * R_sun  # meters
+
+Rp_over_Rs = np.sqrt(delta)
+R_planet = Rp_over_Rs * R_star        # meters
+R_planet_Rjup = R_planet / R_jup      # in Jupiter radii
+
+print(f"R_star = {R_star_Rsun:.3f} R_sun")
+print(f"R_p / R_star = {Rp_over_Rs:.4f}")
+print(f"R_p ≈ {R_planet_Rjup:.3f} R_Jupiter")
+
+# ------------------------------------------------------------
+# 7. Put results into a table
+# ------------------------------------------------------------
+results = pd.DataFrame(
+    {
+        "Stellar Radius [R_sun]": [R_star_Rsun],
+        "Planet Radius [R_Jupiter]": [R_planet_Rjup],
+        "Orbital Period [days]": [best_period],
+        "Transit Depth delta": [delta],
+    }
+)
+
+print("\nDerived system parameters:")
+print(results.to_string(index=False))
