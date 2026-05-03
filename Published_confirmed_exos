@@ -1,0 +1,32 @@
+# All published confirmed planets queried to make calculations for final paper 
+import pandas as pd
+
+url = (
+    "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?"
+    "query=select+pl_name,hostname,pl_orbper,pl_trandep,pl_rade,st_rad"
+    "+from+pscomppars"
+    "+where+disc_facility+=+'Transiting+Exoplanet+Survey+Satellite+(TESS)'"
+    "&format=csv"
+)
+
+
+df = pd.read_csv(url)
+
+print(df.head())
+print("Number of planetary candidates:", len(df))
+
+cols = ["pl_orbper", "pl_trandep", "pl_rade", "st_rad"]
+for c in cols:
+    df[c] = pd.to_numeric(df[c], errors="coerce")
+
+summary = pd.DataFrame({
+    "N": df[cols].count(),
+    "Mean": df[cols].mean(),
+    "Median": df[cols].median(),
+    "Q25": df[cols].quantile(0.25),
+    "Q75": df[cols].quantile(0.75),
+    "Min": df[cols].min(),
+    "Max": df[cols].max(),
+})
+
+print(summary)
