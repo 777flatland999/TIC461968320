@@ -1,0 +1,13 @@
+#Querying the planet we were given preset data on for final comparison. 
+
+import pandas as pd
+
+url = (
+    "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?"
+    "query=select+tid,toi,toidisplay,tfopwg_disp,pl_pnum,pl_orbper,pl_trandep,pl_rade,st_rad"
+    "+from+toi+where+tid+=+461968320"
+    "&format=csv"
+)
+
+df = pd.read_csv(url)
+print(df)
